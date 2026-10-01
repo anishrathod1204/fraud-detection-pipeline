@@ -232,6 +232,9 @@ services:
       GF_INSTALL_PLUGINS: ""
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Mounted as a single file rather than the whole dashboard/ directory,
+      # which also holds the Streamlit app that Grafana must not try to parse.
+      - ./dashboard/fraud_dashboard.json:/etc/grafana/dashboards/fraud_dashboard.json:ro
       - grafana-data:/var/lib/grafana
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]

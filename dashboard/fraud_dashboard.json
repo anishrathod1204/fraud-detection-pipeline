@@ -1,0 +1,26 @@
+{
+  "uid": "fraud-detection-overview",
+  "title": "Fraud Detection - Real-Time Overview",
+  "description": "Live view of transaction ingestion, fraud scoring output and pipeline health. Panels are grouped into Traffic, Fraud Signals and System Health rows.",
+  "tags": ["fraud", "streaming", "kafka", "spark", "cassandra"],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m"]
+  },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": []
+}

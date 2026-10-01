@@ -1,0 +1,28 @@
+# =============================================================================
+# Grafana dashboard provisioning
+# =============================================================================
+# Loads dashboard JSON from disk on startup and re-reads it every 30s, so
+# editing dashboard/fraud_dashboard.json and saving is enough to see the change
+# - no container restart, no manual import.
+#
+# allowUiUpdates is false on purpose. The JSON in git is the single source of
+# truth; permitting UI saves would let the running dashboard drift away from the
+# committed definition with no record of the change.
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: fraud-detection
+    orgId: 1
+    folder: Fraud Detection
+    folderUid: fraud-detection
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      # Dashboards are kept flat in one folder rather than mirroring the
+      # directory tree.
+      foldersFromFilesStructure: false
