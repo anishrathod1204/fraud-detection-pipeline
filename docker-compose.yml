@@ -245,6 +245,33 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # Kafka UI - browse topics, inspect message payloads, watch consumer-group
+  # offsets and lag. Primarily a debugging aid: when the streaming job produces
+  # no alerts, this is where you confirm whether messages are arriving at all
+  # and whether the JSON on the wire matches the expected schema.
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: fraud-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: fraud-detection
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_METRICS_PORT: "9101"
+      DYNAMIC_CONFIG_ENABLED: "true"
+      AUTH_TYPE: DISABLED
+      # Keeps the container quiet; the broker logs are the interesting ones.
+      LOGGING_LEVEL_ROOT: warn
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
