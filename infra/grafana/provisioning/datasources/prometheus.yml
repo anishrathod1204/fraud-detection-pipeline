@@ -1,0 +1,39 @@
+# =============================================================================
+# Grafana datasource provisioning
+# =============================================================================
+# Provisioned as code rather than clicked in through the UI, so a fresh
+# `make up` yields a working dashboard with zero manual setup.
+#
+# The explicit `uid` is load-bearing: every panel target in
+# dashboard/fraud_dashboard.json references datasource uid "fraud-prometheus".
+# Letting Grafana generate a random uid would break those references on each
+# rebuild.
+# =============================================================================
+
+apiVersion: 1
+
+# Removes stale copies if the datasource is ever renamed.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    uid: fraud-prometheus
+    type: prometheus
+    access: proxy
+    # Service name, not localhost - Grafana resolves this inside fraud-net.
+    url: http://prometheus:9090
+    orgId: 1
+    isDefault: true
+    # editable: false keeps the provisioned definition authoritative; UI edits
+    # would silently diverge from what is in git.
+    editable: false
+    jsonData:
+      # Matches the Prometheus scrape_interval so $__rate_interval resolves to a
+      # sane window and rate() queries are not computed over a single sample.
+      timeInterval: 5s
+      # POST avoids URL-length limits on the longer dashboard queries.
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: 2.53.0

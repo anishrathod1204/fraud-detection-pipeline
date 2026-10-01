@@ -202,6 +202,46 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # Grafana - operational dashboards.
+  #
+  # Anonymous viewer access is enabled so the dashboard opens straight away for
+  # a demo; the admin account still exists for editing. Both are acceptable
+  # only because this stack is local-only.
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: fraud-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: dark
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "true"
+      # Suppress outbound calls - this stack must work fully offline.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
@@ -214,3 +254,5 @@ volumes:
     name: fraud-cassandra-data
   prometheus-data:
     name: fraud-prometheus-data
+  grafana-data:
+    name: fraud-grafana-data
