@@ -107,6 +107,44 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # Cassandra - serving store for scored transactions and fraud alerts.
+  #
+  # Single node with a small fixed heap: the default sizing heuristic claims a
+  # quarter of host RAM, which is wasteful for local development. vnode count is
+  # reduced from 256 to 16 purely to shorten startup.
+  # ---------------------------------------------------------------------------
+  cassandra:
+    image: cassandra:4.1
+    container_name: fraud-cassandra
+    hostname: cassandra
+    restart: unless-stopped
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: fraud-detection-cluster
+      CASSANDRA_DC: ${CASSANDRA_DATACENTER:-datacenter1}
+      CASSANDRA_RACK: rack1
+      # GossipingPropertyFileSnitch keeps the DC name stable, which the Python
+      # driver requires for its DC-aware load-balancing policy.
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_NUM_TOKENS: 16
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      # CQL readiness, not just process liveness: the native transport binds
+      # several seconds after the JVM starts.
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
@@ -115,3 +153,5 @@ networks:
 volumes:
   kafka-data:
     name: fraud-kafka-data
+  cassandra-data:
+    name: fraud-cassandra-data
