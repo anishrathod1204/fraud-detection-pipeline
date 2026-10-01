@@ -79,6 +79,34 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # One-shot topic bootstrap. Exits 0 once `transactions`, `fraud-alerts` and
+  # the dead-letter topic exist with the configured partition counts, which
+  # gates every downstream Kafka client via `service_completed_successfully`.
+  # ---------------------------------------------------------------------------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: fraud-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TRANSACTIONS_TOPIC: ${KAFKA_TRANSACTIONS_TOPIC:-transactions}
+      KAFKA_ALERTS_TOPIC: ${KAFKA_ALERTS_TOPIC:-fraud-alerts}
+      KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-transactions-dlq}
+      KAFKA_TRANSACTIONS_PARTITIONS: ${KAFKA_TRANSACTIONS_PARTITIONS:-6}
+      KAFKA_ALERTS_PARTITIONS: ${KAFKA_ALERTS_PARTITIONS:-3}
+      KAFKA_DLQ_PARTITIONS: ${KAFKA_DLQ_PARTITIONS:-1}
+      KAFKA_REPLICATION_FACTOR: ${KAFKA_REPLICATION_FACTOR:-1}
+    volumes:
+      - ./infra/kafka/create_topics.sh:/opt/init/create_topics.sh:ro
+    entrypoint: ["bash", "/opt/init/create_topics.sh"]
+    restart: on-failure
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
