@@ -95,9 +95,16 @@ PAYSIM_FIELD_TYPES: Final[Mapping[str, str]] = {
 #: inference on a chunked read can assign different types to different chunks of
 #: the same column, and float32 halves the memory footprint of a 6M-row frame at
 #: no cost to a tree ensemble's accuracy.
+#:
+#: ``type`` is read as ``string``, deliberately **not** ``category``. A
+#: categorical dtype is inferred per chunk, so chunks containing different
+#: subsets of transaction types end up with different category codes, and
+#: concatenating them yields a column whose encoding depends on the chunk size.
+#: One-hot encoding is done later against the fixed :data:`TRANSACTION_TYPES`
+#: list, which is stable by construction.
 PAYSIM_DTYPES: Final[Mapping[str, str]] = {
     "step": "int32",
-    "type": "category",
+    "type": "string",
     "amount": "float32",
     "nameOrig": "string",
     "oldbalanceOrg": "float32",
