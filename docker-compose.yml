@@ -272,6 +272,38 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # Kafka exporter - translates broker and consumer-group state into Prometheus
+  # metrics. This is what makes the consumer-lag panel on the System Health row
+  # possible: lag is the authoritative indicator of whether the Spark job is
+  # keeping up with the producer, and it cannot be derived from the job's own
+  # self-reported throughput.
+  #
+  # Waits on kafka-init because querying a consumer group for topics that do not
+  # exist yet produces a burst of exporter errors on first start.
+  # ---------------------------------------------------------------------------
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: fraud-kafka-exporter
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    ports:
+      - "9308:9308"
+    command:
+      - --kafka.server=kafka:29092
+      # '$$' escapes to a literal '$' - Compose performs variable interpolation
+      # on this value before the container sees it.
+      - --topic.filter=^(transactions|fraud-alerts|transactions-dlq)$$
+      - --group.filter=.*
+      - --log.level=warn
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
