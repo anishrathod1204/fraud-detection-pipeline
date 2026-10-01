@@ -414,20 +414,34 @@ class ProducerConfig:
     csv_path: Path
     chunk_size: int
     tps: int
+    flush_every_records: int
+    flush_interval_seconds: float
     stats_interval_seconds: float
     metrics_port: int
+
+    #: Upper bound on records awaiting acknowledgement between flushes. Above
+    #: this the client's send buffer, not the configured cadence, decides when
+    #: data reaches the broker, so the crash-loss bound stops being meaningful.
+    MAX_FLUSH_EVERY_RECORDS: ClassVar[int] = 10_000
 
     def __post_init__(self) -> None:
         """Validate throttling and chunk sizing.
 
         Raises:
-            ConfigError: If the chunk size is below the practical minimum.
+            ConfigError: If the chunk size is below the practical minimum, or
+                the flush cadence would exceed the client's batch capacity.
         """
         # Sub-1000 chunks make the chunked read dominated by per-chunk pandas
         # overhead rather than I/O, defeating the point of chunking.
         if self.chunk_size < 1_000:
             raise ConfigError(
                 f"PRODUCER_CHUNK_SIZE={self.chunk_size} is too small; use >= 1000"
+            )
+        if self.flush_every_records > self.MAX_FLUSH_EVERY_RECORDS:
+            raise ConfigError(
+                f"PRODUCER_FLUSH_EVERY_RECORDS={self.flush_every_records} is too "
+                f"large; keep it <= {self.MAX_FLUSH_EVERY_RECORDS} so a crash "
+                "cannot lose an unbounded number of unacknowledged records"
             )
 
     @property
@@ -452,6 +466,12 @@ class ProducerConfig:
             chunk_size=_env_int("PRODUCER_CHUNK_SIZE", 50_000, minimum=1),
             # 0 means unthrottled; see ProducerConfig.throttled.
             tps=_env_int("PRODUCER_TPS", 50, minimum=0),
+            flush_every_records=_env_int(
+                "PRODUCER_FLUSH_EVERY_RECORDS", 500, minimum=1
+            ),
+            flush_interval_seconds=_env_float(
+                "PRODUCER_FLUSH_INTERVAL_SECONDS", 1.0, minimum=0.01
+            ),
             stats_interval_seconds=_env_float(
                 "PRODUCER_STATS_INTERVAL_SECONDS", 10.0, minimum=0.5
             ),
