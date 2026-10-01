@@ -36,6 +36,7 @@ __all__ = [
     "ConfigError",
     "KafkaConfig",
     "LoggingConfig",
+    "ProducerConfig",
     "get_config",
     "load_dotenv",
     "repo_root",
@@ -234,6 +235,20 @@ def _env_csv(name: str, default: str) -> tuple[str, ...]:
     return items
 
 
+def _resolve_path(value: str) -> Path:
+    """Resolve a configured path, treating relative paths as repo-relative.
+
+    Args:
+        value: Absolute or repository-relative path string.
+
+    Returns:
+        An absolute path. Not required to exist - callers that need the file
+        report a clearer error than this helper could.
+    """
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else repo_root() / path
+
+
 # ---------------------------------------------------------------------------
 # Configuration sections
 # ---------------------------------------------------------------------------
@@ -393,6 +408,58 @@ class CassandraConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ProducerConfig:
+    """Stream-simulation settings for the Kafka producer."""
+
+    csv_path: Path
+    chunk_size: int
+    tps: int
+    stats_interval_seconds: float
+    metrics_port: int
+
+    def __post_init__(self) -> None:
+        """Validate throttling and chunk sizing.
+
+        Raises:
+            ConfigError: If the chunk size is below the practical minimum.
+        """
+        # Sub-1000 chunks make the chunked read dominated by per-chunk pandas
+        # overhead rather than I/O, defeating the point of chunking.
+        if self.chunk_size < 1_000:
+            raise ConfigError(
+                f"PRODUCER_CHUNK_SIZE={self.chunk_size} is too small; use >= 1000"
+            )
+
+    @property
+    def throttled(self) -> bool:
+        """Whether a target rate is enforced.
+
+        Returns:
+            ``False`` when ``PRODUCER_TPS`` is 0, meaning publish as fast as the
+            broker accepts - used by the load test.
+        """
+        return self.tps > 0
+
+    @classmethod
+    def from_env(cls) -> ProducerConfig:
+        """Build a :class:`ProducerConfig` from the environment.
+
+        Returns:
+            A validated, immutable producer configuration.
+        """
+        return cls(
+            csv_path=_resolve_path(_env_str("PAYSIM_CSV_PATH", "data/paysim.csv")),
+            chunk_size=_env_int("PRODUCER_CHUNK_SIZE", 50_000, minimum=1),
+            # 0 means unthrottled; see ProducerConfig.throttled.
+            tps=_env_int("PRODUCER_TPS", 50, minimum=0),
+            stats_interval_seconds=_env_float(
+                "PRODUCER_STATS_INTERVAL_SECONDS", 10.0, minimum=0.5
+            ),
+            metrics_port=_env_int("PRODUCER_METRICS_PORT", 8001, minimum=1024),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LoggingConfig:
     """Log verbosity and output format."""
 
@@ -443,6 +510,7 @@ class AppConfig:
 
     kafka: KafkaConfig
     cassandra: CassandraConfig
+    producer: ProducerConfig
     logging: LoggingConfig
 
     @classmethod
@@ -455,6 +523,7 @@ class AppConfig:
         return cls(
             kafka=KafkaConfig.from_env(),
             cassandra=CassandraConfig.from_env(),
+            producer=ProducerConfig.from_env(),
             logging=LoggingConfig.from_env(),
         )
 
