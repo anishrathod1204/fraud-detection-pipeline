@@ -170,6 +170,38 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # Prometheus - pull-based metric collection.
+  #
+  # extra_hosts maps host.docker.internal to the bridge gateway so the scrape
+  # targets for the host-run producer and Spark job resolve on Linux as well as
+  # Docker Desktop.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: fraud-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=72h
+      - --web.enable-lifecycle          # allows config reload without restart
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
@@ -180,3 +212,5 @@ volumes:
     name: fraud-kafka-data
   cassandra-data:
     name: fraud-cassandra-data
+  prometheus-data:
+    name: fraud-prometheus-data

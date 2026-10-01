@@ -1,0 +1,63 @@
+# =============================================================================
+# Prometheus scrape configuration
+# =============================================================================
+# A 5s scrape interval is deliberately aggressive. The point of this pipeline is
+# sub-second detection latency, so a 15s or 30s default would alias away exactly
+# the spikes the Grafana dashboard exists to show.
+#
+# Targets live in two places. kafka-exporter runs inside the compose network and
+# is addressed by service name. The producer and the Spark streaming job are
+# normally run on the HOST (Spark in particular is far easier to iterate on
+# outside a container), so they are reached through host.docker.internal, which
+# is mapped to the gateway address in docker-compose.yml for Linux parity.
+#
+# Those two targets read as DOWN until the corresponding process is started.
+# That is expected, and is itself useful signal on the System Health row.
+# =============================================================================
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: fraud-detection
+    env: local
+
+scrape_configs:
+  # ---------------------------------------------------------------------------
+  # Prometheus self-monitoring - confirms the scrape loop itself is healthy.
+  # ---------------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          component: prometheus
+
+  # ---------------------------------------------------------------------------
+  # Kafka broker and consumer-group metrics, including per-partition consumer
+  # lag - the single most important backpressure signal for this pipeline.
+  # ---------------------------------------------------------------------------
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+        labels:
+          component: kafka
+
+  # ---------------------------------------------------------------------------
+  # Transaction stream simulator (producer/simulate_stream.py).
+  # ---------------------------------------------------------------------------
+  - job_name: fraud-producer
+    static_configs:
+      - targets: ["host.docker.internal:8001"]
+        labels:
+          component: producer
+
+  # ---------------------------------------------------------------------------
+  # Spark Structured Streaming scoring job (streaming/fraud_stream_job.py).
+  # Exposes records/sec, alert rate and micro-batch latency histograms.
+  # ---------------------------------------------------------------------------
+  - job_name: fraud-streaming
+    static_configs:
+      - targets: ["host.docker.internal:8002"]
+        labels:
+          component: streaming
