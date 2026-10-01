@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.installed.cfg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Testing / linting caches
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Datasets - PaySim is ~470 MB, never commit it
+# ---------------------------------------------------------------------------
+data/
+*.csv
+*.csv.gz
+*.parquet
+
+# ---------------------------------------------------------------------------
+# Model artifacts - regenerate with `make train`, do not version binaries
+# ---------------------------------------------------------------------------
+training/artifacts/*
+!training/artifacts/.gitkeep
+
+# Generated evaluation report (written by training/train_model.py)
+docs/model_evaluation.md
+
+# ---------------------------------------------------------------------------
+# Spark / streaming runtime state
+# ---------------------------------------------------------------------------
+checkpoints/
+spark-warehouse/
+derby.log
+metastore_db/
+*.crc
+
+# ---------------------------------------------------------------------------
+# Local runtime state & secrets
+# ---------------------------------------------------------------------------
+.env
+logs/
+*.log
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
