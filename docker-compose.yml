@@ -145,6 +145,31 @@ services:
       - fraud-net
     logging: *default-logging
 
+  # ---------------------------------------------------------------------------
+  # One-shot schema initialiser. Creates the keyspace and tables, then verifies
+  # they exist before exiting 0 - a silent partial apply would surface much
+  # later as a write failure in the streaming job.
+  # ---------------------------------------------------------------------------
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: fraud-cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_PORT: "9042"
+      CASSANDRA_KEYSPACE: ${CASSANDRA_KEYSPACE:-fraud_detection}
+      CASSANDRA_SCHEMA_FILE: /opt/init/schema.cql
+    volumes:
+      - ./infra/cassandra/schema.cql:/opt/init/schema.cql:ro
+      - ./infra/cassandra/init.sh:/opt/init/init.sh:ro
+    entrypoint: ["bash", "/opt/init/init.sh"]
+    restart: on-failure
+    networks:
+      - fraud-net
+    logging: *default-logging
+
 networks:
   fraud-net:
     name: fraud-net
