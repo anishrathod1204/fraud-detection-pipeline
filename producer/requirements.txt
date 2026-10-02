@@ -1,0 +1,30 @@
+# Producer runtime dependencies.
+#
+# Deliberately short. The producer is the smallest component in the pipeline and
+# the one most likely to be run on a laptop against the Docker stack, so every
+# dependency here is a cost paid on that machine. It shares the PaySim schema
+# and configuration layer from `common/`, which pulls in pandas and numpy; that
+# is why they are pinned here rather than assumed.
+#
+# Pin to compatible-release (~=) rather than exact (==): these are libraries, not
+# applications, and an exact pin across four components guarantees a resolution
+# conflict the moment one of them needs a patch. The minor version is held, so a
+# breaking major cannot arrive silently.
+#
+# Install with:  pip install -r producer/requirements.txt
+
+# Kafka client. Chosen over confluent-kafka (librdkafka, a C build) because it
+# is pure Python and installs without a toolchain on every platform the project
+# targets. See docs/architecture.md for the throughput tradeoff.
+kafka-python~=2.0
+
+# Structured CSV reading with bounded memory (common/dataset.py).
+pandas~=2.2
+
+# Array ops for sampling and feature vectors. Held at 2.x, not 1.x: the code is
+# developed and verified against numpy 2.2, and pandas 2.2+ supports it, so
+# pinning 1.x would force a downgrade for no reason.
+numpy~=2.2
+
+# Prometheus client for the producer's /metrics endpoint.
+prometheus_client~=0.20
