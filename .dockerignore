@@ -1,0 +1,55 @@
+# Build-context exclusions.
+#
+# The context for the producer image is the repository root (the image needs the
+# shared `common/` package). Docker reads .dockerignore only from the context
+# root, so it lives here rather than beside the Dockerfile. Without it the
+# daemon would ship the whole checkout - including the 470 MB PaySim CSV and the
+# Spark checkpoints - before the first instruction runs.
+
+# --- Version control -------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+
+# --- Data and model artifacts (large; mounted at runtime instead) ----------
+data/
+*.csv
+*.csv.gz
+*.parquet
+training/artifacts/
+
+# --- Runtime state ---------------------------------------------------------
+checkpoints/
+logs/
+*.log
+.env
+
+# --- Python build and cache directories ------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Excluded from the producer image --------------------------------------
+# These directories are not copied by producer/Dockerfile, so listing them keeps
+# an edit to the dashboard or the streaming job from invalidating the producer's
+# cached dependency layer.
+dashboard/
+streaming/
+tests/
+docs/
+infra/
+scripts/
+
+# --- Editors and OS --------------------------------------------------------
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
