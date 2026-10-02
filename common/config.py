@@ -34,9 +34,13 @@ __all__ = [
     "AppConfig",
     "CassandraConfig",
     "ConfigError",
+    "DashboardConfig",
+    "FeatureConfig",
     "KafkaConfig",
     "LoggingConfig",
+    "ModelConfig",
     "ProducerConfig",
+    "StreamingConfig",
     "get_config",
     "load_dotenv",
     "repo_root",
@@ -233,6 +237,35 @@ def _env_csv(name: str, default: str) -> tuple[str, ...]:
     if not items:
         raise ConfigError(f"{name}={raw!r} must contain at least one value")
     return items
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean environment variable.
+
+    Accepts the conventional affirmative and negative spellings rather than
+    ``bool("false")`` (which is ``True``) - a mistake that silently enables a
+    feature a variable was set to disable.
+
+    Args:
+        name: Environment variable name.
+        default: Value to use when unset or empty.
+
+    Returns:
+        The parsed boolean.
+
+    Raises:
+        ConfigError: If the value is not one of the recognised spellings.
+    """
+    raw = os.environ.get(name, "").strip().lower()
+    if raw == "":
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(
+        f"{name}={raw!r} is not a valid boolean; use true/false, yes/no, on/off or 1/0"
+    )
 
 
 def _resolve_path(value: str) -> Path:
@@ -480,8 +513,231 @@ class ProducerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FeatureConfig:
+    """Feature-engineering settings shared by training and streaming.
+
+    These values define the feature vector, so they are read by both the
+    training job and the Spark scoring job from this one place. A velocity
+    window that differed between the two would produce a model evaluated on one
+    feature distribution and served another - the classic training/serving
+    skew - so nothing here may be duplicated at a call site.
+    """
+
+    velocity_window_steps: int
+    velocity_cache_max_accounts: int
+
+    def __post_init__(self) -> None:
+        """Validate the velocity window bounds.
+
+        Raises:
+            ConfigError: If the window is non-positive (a zero window makes
+                every velocity feature meaningless) or the account cache is
+                non-positive.
+        """
+        if self.velocity_window_steps < 1:
+            raise ConfigError(
+                f"VELOCITY_WINDOW_STEPS={self.velocity_window_steps} must be >= 1"
+            )
+        if self.velocity_cache_max_accounts < 1:
+            raise ConfigError(
+                "VELOCITY_CACHE_MAX_ACCOUNTS must be >= 1"
+            )
+
+    @classmethod
+    def from_env(cls) -> FeatureConfig:
+        """Build a :class:`FeatureConfig` from the environment.
+
+        Returns:
+            A validated, immutable feature configuration.
+        """
+        return cls(
+            velocity_window_steps=_env_int("VELOCITY_WINDOW_STEPS", 24, minimum=1),
+            velocity_cache_max_accounts=_env_int(
+                "VELOCITY_CACHE_MAX_ACCOUNTS", 500_000, minimum=1
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ModelConfig:
+    """Training and threshold-selection settings for the anomaly models."""
+
+    artifact_dir: Path
+    training_sample_rows: int
+    random_seed: int
+    isolation_forest_n_estimators: int
+    isolation_forest_max_samples: int
+    isolation_forest_contamination: float
+    autoencoder_epochs: int
+    autoencoder_batch_size: int
+    autoencoder_latent_dim: int
+    autoencoder_learning_rate: float
+    target_min_recall: float
+
+    def __post_init__(self) -> None:
+        """Validate contamination and recall targets against their domains.
+
+        Raises:
+            ConfigError: If ``contamination`` is outside ``(0, 0.5]`` - a value
+                above 0.5 would label the majority normal - or the recall target
+                is outside ``(0, 1]``.
+        """
+        if not 0.0 < self.isolation_forest_contamination <= 0.5:
+            raise ConfigError(
+                "ISOLATION_FOREST_CONTAMINATION must be in (0, 0.5], got "
+                f"{self.isolation_forest_contamination}"
+            )
+        if not 0.0 < self.target_min_recall <= 1.0:
+            raise ConfigError(
+                f"TARGET_MIN_RECALL must be in (0, 1], got {self.target_min_recall}"
+            )
+
+    @property
+    def artifact_path(self) -> Path:
+        """Return the directory where the trained model bundle is written.
+
+        Returns:
+            The resolved artifact directory.
+        """
+        return self.artifact_dir
+
+    @classmethod
+    def from_env(cls) -> ModelConfig:
+        """Build a :class:`ModelConfig` from the environment.
+
+        Returns:
+            A validated, immutable model configuration.
+        """
+        return cls(
+            artifact_dir=_resolve_path(
+                _env_str("MODEL_ARTIFACT_DIR", "training/artifacts")
+            ),
+            training_sample_rows=_env_int(
+                "TRAINING_SAMPLE_ROWS", 1_000_000, minimum=1_000
+            ),
+            random_seed=_env_int("TRAINING_RANDOM_SEED", 42, minimum=0),
+            isolation_forest_n_estimators=_env_int(
+                "ISOLATION_FOREST_N_ESTIMATORS", 200, minimum=10
+            ),
+            isolation_forest_max_samples=_env_int(
+                "ISOLATION_FOREST_MAX_SAMPLES", 65_536, minimum=256
+            ),
+            isolation_forest_contamination=_env_float(
+                "ISOLATION_FOREST_CONTAMINATION", 0.0015, minimum=0.0001
+            ),
+            autoencoder_epochs=_env_int("AUTOENCODER_EPOCHS", 12, minimum=1),
+            autoencoder_batch_size=_env_int(
+                "AUTOENCODER_BATCH_SIZE", 1024, minimum=16
+            ),
+            autoencoder_latent_dim=_env_int("AUTOENCODER_LATENT_DIM", 6, minimum=1),
+            autoencoder_learning_rate=_env_float(
+                "AUTOENCODER_LEARNING_RATE", 0.001, minimum=1e-6
+            ),
+            target_min_recall=_env_float(
+                "TARGET_MIN_RECALL", 0.95, minimum=0.0001
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StreamingConfig:
+    """Spark Structured Streaming job settings."""
+
+    master: str
+    app_name: str
+    checkpoint_dir: Path
+    trigger_interval: str
+    max_offsets_per_trigger: int
+    shuffle_partitions: int
+    executor_memory: str
+    driver_memory: str
+    arrow_batch_size: int
+    starting_offsets: str
+    watermark: str
+    metrics_port: int
+    persist_raw: bool
+
+    #: Kafka offset reset strategies Spark accepts.
+    VALID_STARTING_OFFSETS: ClassVar[frozenset[str]] = frozenset(
+        {"earliest", "latest"}
+    )
+
+    def __post_init__(self) -> None:
+        """Validate the starting-offset strategy.
+
+        Raises:
+            ConfigError: If ``starting_offsets`` is not ``earliest`` or
+                ``latest``.
+        """
+        if self.starting_offsets not in self.VALID_STARTING_OFFSETS:
+            raise ConfigError(
+                f"SPARK_STARTING_OFFSETS={self.starting_offsets!r} must be "
+                "'earliest' or 'latest'"
+            )
+
+    @classmethod
+    def from_env(cls) -> StreamingConfig:
+        """Build a :class:`StreamingConfig` from the environment.
+
+        Returns:
+            A validated, immutable streaming configuration.
+        """
+        return cls(
+            master=_env_str("SPARK_MASTER", "local[4]"),
+            app_name=_env_str("SPARK_APP_NAME", "fraud-stream-job"),
+            checkpoint_dir=_resolve_path(
+                _env_str("SPARK_CHECKPOINT_DIR", "checkpoints/fraud-stream")
+            ),
+            trigger_interval=_env_str("SPARK_TRIGGER_INTERVAL", "2 seconds"),
+            max_offsets_per_trigger=_env_int(
+                "SPARK_MAX_OFFSETS_PER_TRIGGER", 20_000, minimum=1
+            ),
+            shuffle_partitions=_env_int("SPARK_SHUFFLE_PARTITIONS", 8, minimum=1),
+            executor_memory=_env_str("SPARK_EXECUTOR_MEMORY", "2g"),
+            driver_memory=_env_str("SPARK_DRIVER_MEMORY", "2g"),
+            arrow_batch_size=_env_int("SPARK_ARROW_BATCH_SIZE", 10_000, minimum=1),
+            starting_offsets=_env_str("SPARK_STARTING_OFFSETS", "latest").lower(),
+            watermark=_env_str("STREAMING_WATERMARK", "5 minutes"),
+            metrics_port=_env_int("STREAMING_METRICS_PORT", 8002, minimum=1024),
+            persist_raw=_env_bool("STREAMING_PERSIST_RAW", True),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardConfig:
+    """Streamlit live-feed settings."""
+
+    refresh_seconds: float
+    alert_limit: int
+
+    def __post_init__(self) -> None:
+        """Validate polling bounds.
+
+        Raises:
+            ConfigError: If the refresh interval or alert limit is non-positive.
+        """
+        if self.refresh_seconds <= 0.0:
+            raise ConfigError("STREAMLIT_REFRESH_SECONDS must be > 0")
+        if self.alert_limit < 1:
+            raise ConfigError("STREAMLIT_ALERT_LIMIT must be >= 1")
+
+    @classmethod
+    def from_env(cls) -> DashboardConfig:
+        """Build a :class:`DashboardConfig` from the environment.
+
+        Returns:
+            A validated, immutable dashboard configuration.
+        """
+        return cls(
+            refresh_seconds=_env_float(
+                "STREAMLIT_REFRESH_SECONDS", 5.0, minimum=0.1
+            ),
+            alert_limit=_env_int("STREAMLIT_ALERT_LIMIT", 100, minimum=1),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LoggingConfig:
-    """Log verbosity and output format."""
 
     level: str
     format: str
@@ -531,6 +787,10 @@ class AppConfig:
     kafka: KafkaConfig
     cassandra: CassandraConfig
     producer: ProducerConfig
+    features: FeatureConfig
+    model: ModelConfig
+    streaming: StreamingConfig
+    dashboard: DashboardConfig
     logging: LoggingConfig
 
     @classmethod
@@ -544,6 +804,10 @@ class AppConfig:
             kafka=KafkaConfig.from_env(),
             cassandra=CassandraConfig.from_env(),
             producer=ProducerConfig.from_env(),
+            features=FeatureConfig.from_env(),
+            model=ModelConfig.from_env(),
+            streaming=StreamingConfig.from_env(),
+            dashboard=DashboardConfig.from_env(),
             logging=LoggingConfig.from_env(),
         )
 
