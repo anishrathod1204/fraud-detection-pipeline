@@ -16,14 +16,21 @@ from common.config import AppConfig, load_dotenv
 
 try:
     from pyspark.sql import SparkSession, DataFrame
-    from pyspark.sql.functions import col, from_json, to_timestamp, lit
+    from pyspark.sql.functions import col, from_json, to_timestamp, lit, pandas_udf
     from pyspark.sql.types import (
-        StructType, StructField, StringType, DoubleType, LongType, IntegerType
+        StructType, StructField, StringType, DoubleType, LongType, IntegerType, FloatType
     )
+    import pandas as pd
 except ImportError:
     pass  # Allow syntax check to pass without PySpark
 
+import numpy as np
+from common.features import VelocityTracker, feature_names
+from training.bundle import ModelBundle, load_bundle
+
 logger = logging.getLogger(__name__)
+
+_bundle_cache: dict[str, ModelBundle] = {}
 
 
 def _paysim_schema() -> "StructType":
@@ -86,8 +93,28 @@ def main() -> None:
     raw = _kafka_source(spark, cfg)
     parsed, dlq = _parse_messages(raw, cfg)
     
+    score_udf = get_score_batch_udf(
+        str(cfg.model.artifact_path.resolve()), 
+        cfg.features.velocity_cache_max_accounts
+    )
+    
+    from pyspark.sql.functions import struct
+    # We pass the relevant columns as a struct to the UDF so it receives a pandas DataFrame
+    paysim_cols = [f.name for f in _paysim_schema().fields]
+    scored = parsed.withColumn("if_score", score_udf(struct(*paysim_cols)))
+    
+    # Load bundle here just to get the threshold, handle gracefully if missing
+    threshold = float("inf")
+    try:
+        bundle = load_bundle(cfg.model.artifact_path)
+        threshold = bundle.threshold
+    except Exception:
+        logger.warning("Model bundle not found, alerts will not be generated until a model is trained.")
+        
+    alerts = scored.filter(col("if_score") >= lit(threshold))
+    
     # Placeholder for starting the stream, to be replaced by full logic
-    # query = parsed.writeStream.format("console").start()
+    # query = alerts.writeStream.format("console").start()
     # query.awaitTermination()
 
 if __name__ == "__main__":
@@ -122,3 +149,48 @@ def _parse_messages(raw_df: "DataFrame", cfg: AppConfig) -> tuple["DataFrame", "
     dlq = parsed_all.filter(col("amount").isNull())
     
     return parsed, dlq
+
+def _get_bundle(artifact_dir: str) -> ModelBundle:
+    """Load and cache the ModelBundle per executor."""
+    if artifact_dir not in _bundle_cache:
+        _bundle_cache[artifact_dir] = load_bundle(Path(artifact_dir))
+    return _bundle_cache[artifact_dir]
+
+
+def get_score_batch_udf(artifact_dir: str, velocity_cache_max_accounts: int):
+    """Return a pandas UDF for scoring batches of transactions."""
+    
+    # We use a SCALAR_ITER UDF so we can initialize the VelocityTracker once per partition
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+    from collections.abc import Iterator
+    
+    @pandas_udf("double", PandasUDFType.SCALAR_ITER)
+    def _score_batch(iterator: Iterator[pd.DataFrame]) -> Iterator[pd.Series]:
+        try:
+            bundle = _get_bundle(artifact_dir)
+        except Exception:
+            # If the bundle isn't available yet, just yield NaNs.
+            # This allows the streaming job to start before the model is trained.
+            for batch in iterator:
+                yield pd.Series([float('nan')] * len(batch))
+            return
+
+        tracker = VelocityTracker(
+            window=bundle.velocity_window,
+            cache_max_accounts=velocity_cache_max_accounts
+        )
+        
+        for batch in iterator:
+            if batch.empty:
+                yield pd.Series([], dtype=np.float64)
+                continue
+                
+            features_list = []
+            for record in batch.to_dict('records'):
+                features_list.append(tracker.process(record))
+                
+            feature_matrix = np.vstack(features_list)
+            if_scores, _ = bundle.score(feature_matrix)
+            yield pd.Series(if_scores)
+            
+    return _score_batch
