@@ -270,3 +270,21 @@ def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "Dat
 
     # Returns the DataStreamWriter
     return alert_df.writeStream.foreachBatch(process_batch)
+
+def _write_alerts_topic(alert_df: "DataFrame", cfg_kafka: "KafkaConfig") -> "DataFrame":
+    """Sink alerts back to Kafka as JSON, keyed by nameOrig."""
+    from pyspark.sql.functions import to_json, struct, col
+    
+    # We want to format the output as JSON using all columns
+    cols = [col(c) for c in alert_df.columns]
+    
+    json_df = alert_df.select(
+        col("nameOrig").alias("key"),
+        to_json(struct(*cols)).alias("value")
+    )
+    
+    return (
+        json_df.writeStream.format("kafka")
+        .option("kafka.bootstrap.servers", cfg_kafka.bootstrap_servers_string)
+        .option("topic", cfg_kafka.alerts_topic)
+    )
