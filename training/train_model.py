@@ -215,3 +215,51 @@ def _train_forest(
         },
     )
     return forest, if_scores, choice
+
+# ---------------------------------------------------------------------------
+# Autoencoder training
+# ---------------------------------------------------------------------------
+def _train_autoencoder(
+    scaled: np.ndarray, cfg: AppConfig
+) -> tuple[Autoencoder, np.ndarray]:
+    """Fit the autoencoder and compute reconstruction errors.
+
+    Args:
+        scaled: Scaled feature matrix ``(n, n_features)``.
+        cfg: Full application configuration.
+
+    Returns:
+        ``(autoencoder, ae_scores)`` where ``ae_scores`` are per-row MSE errors
+        (higher = more anomalous).
+    """
+    n_features = scaled.shape[1]
+    _LOGGER.info(
+        "training Autoencoder",
+        extra={
+            "n_features": n_features,
+            "hidden": 16,
+            "latent": cfg.model.autoencoder_latent_dim,
+            "epochs": cfg.model.autoencoder_epochs,
+        },
+    )
+    t0 = time.perf_counter()
+    ae = Autoencoder(
+        n_features=n_features,
+        hidden=16,
+        latent=cfg.model.autoencoder_latent_dim,
+    ).fit(
+        scaled,
+        epochs=cfg.model.autoencoder_epochs,
+        batch_size=cfg.model.autoencoder_batch_size,
+        learning_rate=cfg.model.autoencoder_learning_rate,
+        seed=cfg.model.random_seed,
+    )
+    ae_scores = ae.reconstruction_error(scaled)
+    _LOGGER.info(
+        "Autoencoder fitted",
+        extra={
+            "elapsed_s": round(time.perf_counter() - t0, 2),
+            "mean_mse": round(float(ae_scores.mean()), 6),
+        },
+    )
+    return ae, ae_scores
