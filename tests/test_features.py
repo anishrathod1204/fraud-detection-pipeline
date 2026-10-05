@@ -178,3 +178,111 @@ class TestBaseFeatures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestVelocityFeatures(unittest.TestCase):
+    """Test the stateful velocity tracker and batch agreement."""
+
+    def test_velocity_zero_on_first_tx(self):
+        tracker = VelocityTracker(window=10, cache_max_accounts=10)
+        row = {
+            "step": 5, "type": "TRANSFER", "amount": 100.0,
+            "nameOrig": "C1", "oldbalanceOrg": 100.0, "newbalanceOrig": 0.0,
+            "nameDest": "C2", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+        }
+        features = tracker.process(row)
+        
+        # We need to know indices of velocity features. 
+        # FEATURE_NAMES has them at the end.
+        idx_count = FEATURE_NAMES.index("orig_velocity_count")
+        idx_amount = FEATURE_NAMES.index("orig_velocity_amount")
+        
+        self.assertEqual(features[idx_count], 0.0)
+        self.assertEqual(features[idx_amount], 0.0)
+
+    def test_velocity_accumulates(self):
+        tracker = VelocityTracker(window=10, cache_max_accounts=10)
+        row1 = {
+            "step": 5, "type": "TRANSFER", "amount": 100.0,
+            "nameOrig": "C1", "oldbalanceOrg": 100.0, "newbalanceOrig": 0.0,
+            "nameDest": "C2", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+        }
+        row2 = {
+            "step": 7, "type": "TRANSFER", "amount": 200.0,
+            "nameOrig": "C1", "oldbalanceOrg": 200.0, "newbalanceOrig": 0.0,
+            "nameDest": "C2", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+        }
+        tracker.process(row1)
+        features = tracker.process(row2)
+        
+        idx_count = FEATURE_NAMES.index("orig_velocity_count")
+        idx_amount = FEATURE_NAMES.index("orig_velocity_amount")
+        
+        self.assertEqual(features[idx_count], 1.0)
+        self.assertEqual(features[idx_amount], 100.0)
+
+    def test_velocity_window_evicts(self):
+        tracker = VelocityTracker(window=10, cache_max_accounts=10)
+        row1 = {
+            "step": 5, "type": "TRANSFER", "amount": 100.0,
+            "nameOrig": "C1", "oldbalanceOrg": 100.0, "newbalanceOrig": 0.0,
+            "nameDest": "C2", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+        }
+        row2 = {
+            "step": 16, "type": "TRANSFER", "amount": 200.0,
+            "nameOrig": "C1", "oldbalanceOrg": 200.0, "newbalanceOrig": 0.0,
+            "nameDest": "C2", "oldbalanceDest": 0.0, "newbalanceDest": 0.0,
+        }
+        tracker.process(row1)
+        features = tracker.process(row2)
+        
+        idx_count = FEATURE_NAMES.index("orig_velocity_count")
+        idx_amount = FEATURE_NAMES.index("orig_velocity_amount")
+        
+        # row1 is at step 5, row2 at step 16. Window is 10.
+        # lower bound for step 16 is 16 - 10 = 6.
+        # Step 5 < 6, so it should be evicted.
+        self.assertEqual(features[idx_count], 0.0)
+        self.assertEqual(features[idx_amount], 0.0)
+
+    def test_batch_stream_velocity_agreement(self):
+        # drive _batch_velocity and VelocityTracker over the same 20-row frame
+        np.random.seed(42)
+        steps = np.sort(np.random.randint(1, 100, 20))
+        accounts = np.random.choice(["C1", "C2", "C3"], 20)
+        amounts = np.random.uniform(10, 1000, 20)
+        
+        rows = []
+        for i in range(20):
+            rows.append({
+                "step": steps[i],
+                "type": "TRANSFER",
+                "amount": amounts[i],
+                "nameOrig": accounts[i],
+                "oldbalanceOrg": amounts[i],
+                "newbalanceOrig": 0.0,
+                "nameDest": "D1",
+                "oldbalanceDest": 0.0,
+                "newbalanceDest": amounts[i],
+                "isFraud": 0,
+                "isFlaggedFraud": 0,
+            })
+            
+        df = pd.DataFrame(rows)
+        batch_features = build_batch_features(df, velocity_window=10)
+        batch_count = batch_features["orig_velocity_count"].values
+        batch_amount = batch_features["orig_velocity_amount"].values
+        
+        tracker = VelocityTracker(window=10, cache_max_accounts=100)
+        stream_count = []
+        stream_amount = []
+        
+        idx_count = FEATURE_NAMES.index("orig_velocity_count")
+        idx_amount = FEATURE_NAMES.index("orig_velocity_amount")
+        
+        for row in rows:
+            feat = tracker.process(row)
+            stream_count.append(feat[idx_count])
+            stream_amount.append(feat[idx_amount])
+            
+        np.testing.assert_allclose(batch_count, stream_count, rtol=1e-9, atol=1e-9)
+        np.testing.assert_allclose(batch_amount, stream_amount, rtol=1e-9, atol=1e-9)
