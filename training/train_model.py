@@ -99,3 +99,63 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Where to write the markdown evaluation report.",
     )
     return parser.parse_args(argv)
+
+
+# ---------------------------------------------------------------------------
+# Dataset loading and feature engineering
+# ---------------------------------------------------------------------------
+def _load_and_featurize(
+    cfg: AppConfig, sample_rows: int
+) -> tuple[np.ndarray, np.ndarray, FeatureScaler]:
+    """Load the CSV, build features, fit the scaler and return scaled matrix.
+
+    Args:
+        cfg: Full application config.
+        sample_rows: Target rows to sample.
+
+    Returns:
+        ``(scaled_matrix, labels, fitted_scaler)`` where ``scaled_matrix`` is
+        ``(n, n_features)`` float64, ``labels`` is ``(n,)`` int8.
+
+    Raises:
+        DatasetError: If the CSV is missing or malformed.
+        SystemExit: (propagated) if the user asks for help.
+    """
+    csv_path = cfg.producer.csv_path
+    _LOGGER.info("loading dataset", extra={"path": str(csv_path), "max_rows": sample_rows})
+
+    t0 = time.perf_counter()
+    frame = read_frame(
+        csv_path,
+        max_rows=sample_rows,
+        seed=cfg.model.random_seed,
+    )
+    elapsed = time.perf_counter() - t0
+    _LOGGER.info(
+        "dataset loaded",
+        extra={"rows": len(frame), "elapsed_s": round(elapsed, 2)},
+    )
+
+    labels = frame["isFraud"].to_numpy(dtype=np.int8)
+
+    t1 = time.perf_counter()
+    feature_frame = build_batch_features(
+        frame,
+        velocity_window=cfg.features.velocity_window_steps,
+    )
+    _LOGGER.info(
+        "features built",
+        extra={"shape": list(feature_frame.shape), "elapsed_s": round(time.perf_counter() - t1, 2)},
+    )
+
+    matrix = feature_frame.values  # (n, n_features) float64 already from build_batch_features
+
+    t2 = time.perf_counter()
+    scaler = FeatureScaler.fit(matrix, FEATURE_NAMES)
+    scaled = scaler.transform(matrix)
+    _LOGGER.info(
+        "scaler fitted and applied",
+        extra={"elapsed_s": round(time.perf_counter() - t2, 2)},
+    )
+
+    return scaled, labels, scaler
