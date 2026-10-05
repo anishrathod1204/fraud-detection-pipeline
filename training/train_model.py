@@ -159,3 +159,59 @@ def _load_and_featurize(
     )
 
     return scaled, labels, scaler
+
+# ---------------------------------------------------------------------------
+# Isolation Forest training and threshold selection
+# ---------------------------------------------------------------------------
+def _train_forest(
+    scaled: np.ndarray, labels: np.ndarray, cfg: AppConfig
+) -> tuple[IsolationForest, np.ndarray, ThresholdChoice]:
+    """Fit the isolation forest and select the operating threshold.
+
+    Args:
+        scaled: Scaled feature matrix ``(n, n_features)``.
+        labels: Ground-truth fraud labels ``(n,)``.
+        cfg: Full application configuration.
+
+    Returns:
+        ``(forest, if_scores, threshold_choice)``
+    """
+    _LOGGER.info(
+        "training IsolationForest",
+        extra={
+            "n_estimators": cfg.model.isolation_forest_n_estimators,
+            "max_samples": cfg.model.isolation_forest_max_samples,
+        },
+    )
+    t0 = time.perf_counter()
+    forest = IsolationForest(
+        n_estimators=cfg.model.isolation_forest_n_estimators,
+        max_samples=cfg.model.isolation_forest_max_samples,
+    ).fit(scaled, seed=cfg.model.random_seed)
+    _LOGGER.info(
+        "IsolationForest fitted",
+        extra={"elapsed_s": round(time.perf_counter() - t0, 2)},
+    )
+
+    if_scores = forest.score_samples(scaled)
+
+    _LOGGER.info(
+        "selecting threshold",
+        extra={"min_recall": cfg.model.target_min_recall},
+    )
+    choice = select_threshold(
+        labels.astype(np.float64),
+        if_scores,
+        min_recall=cfg.model.target_min_recall,
+    )
+    _LOGGER.info(
+        "threshold selected",
+        extra={
+            "threshold": round(choice.threshold, 6),
+            "precision": round(choice.precision, 4),
+            "recall": round(choice.recall, 4),
+            "f1": round(choice.f1, 4),
+            "alerts_per_1000": round(choice.alerts_per_1000, 2),
+        },
+    )
+    return forest, if_scores, choice
