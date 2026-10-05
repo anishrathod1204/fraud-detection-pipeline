@@ -88,8 +88,33 @@ def main() -> None:
     load_dotenv()
     cfg = AppConfig.from_env()
 
+    expose_metrics(cfg.streaming.metrics_port)
+
     # We will expand this as we build out the pipeline
     spark = _build_spark_session(cfg)
+    
+    # Add StreamingQueryListener to track batch latency and records
+    try:
+        from pyspark.sql.streaming import StreamingQueryListener
+        class MetricsListener(StreamingQueryListener):
+            def onQueryStarted(self, event):
+                pass
+            def onQueryProgress(self, event):
+                try:
+                    num_input_rows = event.progress.numInputRows
+                    RECORDS_PROCESSED.inc(num_input_rows)
+                    batch_duration = event.progress.batchDuration
+                    if batch_duration is not None:
+                        # batchDuration is in milliseconds
+                        BATCH_LATENCY.observe(batch_duration / 1000.0)
+                except Exception:
+                    pass
+            def onQueryTerminated(self, event):
+                pass
+        spark.streams.addListener(MetricsListener())
+    except ImportError:
+        pass
+        
     raw = _kafka_source(spark, cfg)
     parsed, dlq = _parse_messages(raw, cfg)
     
@@ -245,8 +270,18 @@ def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "Dat
         )
         
         # Convert DataFrame to a list of dicts
+        import time
+        start_time = time.time()
+        
         rows = [row.asDict() for row in df.collect()]
         
+        try:
+            ALERTS_GENERATED.inc(len(rows))
+            for row in rows:
+                ALERT_AMOUNT.observe(float(row.get("amount", 0.0)))
+        except NameError:
+            pass  # Prometheus not available
+            
         from common.schema import alert_bucket
         from datetime import datetime, timezone
         
@@ -305,3 +340,35 @@ def _write_alerts_topic(alert_df: "DataFrame", cfg_kafka: "KafkaConfig") -> "Dat
         .option("kafka.bootstrap.servers", cfg_kafka.bootstrap_servers_string)
         .option("topic", cfg_kafka.alerts_topic)
     )
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+try:
+    from prometheus_client import start_http_server, Counter, Histogram
+    
+    RECORDS_PROCESSED = Counter(
+        "records_processed_total", "Total transactions processed"
+    )
+    ALERTS_GENERATED = Counter(
+        "alerts_generated_total", "Total fraud alerts generated"
+    )
+    BATCH_LATENCY = Histogram(
+        "batch_latency_seconds", "Micro-batch processing latency"
+    )
+    ALERT_AMOUNT = Histogram(
+        "alert_amount_usd", 
+        "Amount of flagged transactions",
+        buckets=(10, 50, 100, 500, 1000, 5000, 10000, float("inf"))
+    )
+    
+except ImportError:
+    pass
+
+def expose_metrics(port: int) -> None:
+    """Start the Prometheus metrics server."""
+    try:
+        start_http_server(port)
+        logger.info(f"Prometheus metrics server started on port {port}")
+    except Exception as e:
+        logger.error(f"Failed to start metrics server: {e}")
