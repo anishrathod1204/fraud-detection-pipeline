@@ -194,3 +194,79 @@ def get_score_batch_udf(artifact_dir: str, velocity_cache_max_accounts: int):
             yield pd.Series(if_scores)
             
     return _score_batch
+
+def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "DataFrame":
+    """Sink alerts to Cassandra using foreachBatch."""
+    
+    def process_batch(df: "DataFrame", batch_id: int):
+        if df.isEmpty():
+            return
+            
+        try:
+            from cassandra.cluster import Cluster
+            from cassandra.auth import PlainTextAuthProvider
+            from cassandra.query import BatchStatement
+        except ImportError:
+            logger.warning("Cassandra driver not available, skipping write.")
+            return
+
+        auth_provider = None
+        if cfg_cass.auth_required:
+            auth_provider = PlainTextAuthProvider(cfg_cass.username, cfg_cass.password)
+            
+        cluster = Cluster(
+            contact_points=cfg_cass.contact_points,
+            port=cfg_cass.port,
+            auth_provider=auth_provider
+        )
+        session = cluster.connect(cfg_cass.keyspace)
+        
+        insert_stmt = session.prepare(
+            f"INSERT INTO {cfg_cass.keyspace}.fraud_alerts "
+            "(bucket, event_time, name_orig, name_dest, amount, if_score, tx_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        )
+        
+        # Convert DataFrame to a list of dicts
+        rows = [row.asDict() for row in df.collect()]
+        
+        from common.schema import alert_bucket
+        from datetime import datetime, timezone
+        
+        # Write in batches
+        for i in range(0, len(rows), cfg_cass.write_batch_size):
+            batch = rows[i:i + cfg_cass.write_batch_size]
+            batch_stmt = BatchStatement()
+            
+            for row in batch:
+                # Reconstruct event time and format bucket
+                event_time_dt = row.get("event_time")
+                if not event_time_dt:
+                    event_time_dt = datetime.now(timezone.utc)
+                    
+                bucket = alert_bucket(event_time_dt)
+                
+                batch_stmt.add(insert_stmt, (
+                    bucket,
+                    event_time_dt,
+                    row.get("nameOrig", ""),
+                    row.get("nameDest", ""),
+                    float(row.get("amount", 0.0)),
+                    float(row.get("if_score", 0.0)),
+                    row.get("type", "")
+                ))
+            
+            # Simple retry loop
+            for attempt in range(cfg_cass.max_write_retries):
+                try:
+                    session.execute(batch_stmt, timeout=cfg_cass.request_timeout_seconds)
+                    break
+                except Exception as e:
+                    if attempt == cfg_cass.max_write_retries - 1:
+                        logger.error(f"Failed to write batch to Cassandra: {e}")
+                        raise
+        
+        cluster.shutdown()
+
+    # Returns the DataStreamWriter
+    return alert_df.writeStream.foreachBatch(process_batch)
