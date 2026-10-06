@@ -299,7 +299,8 @@ def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "Dat
                 for row in rows[start : start + cfg_cass.write_batch_size]:
                     detected_at = row.get("detected_at") or datetime.now(timezone.utc)
                     if detected_at.tzinfo is None:
-                        detected_at = detected_at.replace(tzinfo=timezone.utc)
+                        detected_at = detected_at.astimezone()
+                    detected_at = detected_at.astimezone(timezone.utc)
                     alert_id = uuid5(
                         NAMESPACE_URL,
                         f"transactions:{row['partition']}:{row['offset']}",
