@@ -19,7 +19,22 @@ from __future__ import annotations
 
 from typing import Final
 
-from prometheus_client import Counter, Gauge, Histogram
+try:
+    from prometheus_client import Counter, Gauge, Histogram
+except ImportError:  # pragma: no cover - optional dependency in local shells
+    class _NoopMetric:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            return None
+        def set(self, *args, **kwargs):
+            return None
+        def observe(self, *args, **kwargs):
+            return None
+        def labels(self, *args, **kwargs):
+            return self
+
+    Counter = Gauge = Histogram = _NoopMetric
 
 from common.metrics import LATENCY_BUCKETS
 

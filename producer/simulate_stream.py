@@ -42,6 +42,10 @@ from pathlib import Path
 from types import FrameType
 from typing import Final, Sequence
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from common.config import AppConfig, ConfigError, get_config
 from common.dataset import DatasetError, iter_transactions
 from common.logging_config import configure_logging, get_logger

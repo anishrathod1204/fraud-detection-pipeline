@@ -30,7 +30,26 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Final
 
-from prometheus_client import REGISTRY, Gauge, Histogram, start_http_server
+try:
+    from prometheus_client import REGISTRY, Gauge, Histogram, start_http_server
+except ImportError:  # pragma: no cover - optional dependency in local dev shells
+    class _NoopMetric:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            return None
+        def observe(self, *args, **kwargs):
+            return None
+        def set(self, *args, **kwargs):
+            return None
+        def labels(self, *args, **kwargs):
+            return self
+
+    def start_http_server(*args, **kwargs):
+        return None
+
+    REGISTRY = None
+    Gauge = Histogram = _NoopMetric
 
 from common.logging_config import get_logger
 

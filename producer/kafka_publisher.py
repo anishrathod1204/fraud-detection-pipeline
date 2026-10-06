@@ -42,8 +42,12 @@ import time
 from types import TracebackType
 from typing import Any, Final, Mapping
 
-from kafka import KafkaProducer
-from kafka.errors import KafkaError, KafkaTimeoutError, NoBrokersAvailable
+try:
+    from kafka import KafkaProducer
+    from kafka.errors import KafkaError, KafkaTimeoutError, NoBrokersAvailable
+except ImportError:  # pragma: no cover - optional dependency in local shells
+    KafkaProducer = None  # type: ignore[assignment]
+    KafkaError = KafkaTimeoutError = NoBrokersAvailable = RuntimeError
 
 from common.config import KafkaConfig
 from common.logging_config import get_logger
@@ -179,16 +183,16 @@ class TransactionPublisher:
     def connect(self) -> None:
         """Open the producer connection, retrying with exponential backoff.
 
-        Under ``docker compose up`` the broker routinely needs 20-30 seconds
-        before it accepts connections, so a producer that failed on first
-        refusal would be unusable. The retry loop is the difference between
-        "start the stack, then start the producer" and "start the stack, wait,
-        guess, retry by hand".
-
         Raises:
             PublisherError: If every attempt fails. The original error is
                 chained so the cause is not lost.
         """
+        if KafkaProducer is None:
+            raise PublisherError(
+                "kafka-python is not installed in this environment. "
+                "Install the project dependencies or run via Docker Compose."
+            )
+
         if self.connected:
             return
 

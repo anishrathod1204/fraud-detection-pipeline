@@ -103,7 +103,7 @@ produce-fraud: ## Stream only fraud-labelled rows, for demos
 	@$(PYTHON) -m producer.simulate_stream --tps $(TPS) --replay-fraud-only
 
 stream: ## Run the Spark Structured Streaming scoring job
-	@./scripts/run_streaming.sh
+	@$(PYTHON) -m streaming.fraud_stream_job
 
 dashboard: ## Run the Streamlit live alert feed
 	@$(PYTHON) -m streamlit run dashboard/live_feed.py

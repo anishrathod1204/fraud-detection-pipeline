@@ -279,6 +279,8 @@ def _resolve_path(value: str) -> Path:
         report a clearer error than this helper could.
     """
     path = Path(value).expanduser()
+    if os.path.isabs(value) or value.startswith(("/", "\\")):
+        return path
     return path if path.is_absolute() else repo_root() / path
 
 

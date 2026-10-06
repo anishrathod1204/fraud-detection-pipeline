@@ -12,7 +12,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from common.config import AppConfig, load_dotenv
+from common.config import AppConfig, CassandraConfig, KafkaConfig, load_dotenv
 
 try:
     from pyspark.sql import SparkSession, DataFrame
@@ -54,12 +54,16 @@ def _paysim_schema() -> "StructType":
 def _build_spark_session(cfg: "AppConfig") -> "SparkSession":
     """Build and configure the SparkSession."""
     scfg = cfg.streaming
+    os.environ["PYSPARK_PYTHON"] = sys.executable
+    os.environ.pop("PYSPARK_DRIVER_PYTHON", None)
     spark = (
         SparkSession.builder.master(scfg.master)
         .appName(scfg.app_name)
         .config("spark.sql.shuffle.partitions", str(scfg.shuffle_partitions))
         .config("spark.executor.memory", scfg.executor_memory)
         .config("spark.driver.memory", scfg.driver_memory)
+        .config("spark.pyspark.python", sys.executable)
+        .config("spark.sql.session.timeZone", "UTC")
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         # Included directly in spark-submit, but good to have here for local runs
         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0")
@@ -123,20 +127,30 @@ def main() -> None:
         cfg.features.velocity_cache_max_accounts
     )
     
-    from pyspark.sql.functions import struct
+    from pyspark.sql.functions import current_timestamp, struct
     # We pass the relevant columns as a struct to the UDF so it receives a pandas DataFrame
     paysim_cols = [f.name for f in _paysim_schema().fields]
     scored = parsed.withColumn("if_score", score_udf(struct(*paysim_cols)))
     
     # Load bundle here just to get the threshold, handle gracefully if missing
     threshold = float("inf")
+    model_version = "unknown"
     try:
         bundle = load_bundle(cfg.model.artifact_path)
         threshold = bundle.threshold
+        model_version = str(
+            bundle.metadata.get("model_version", bundle.metadata.get("created_at", "iforest"))
+        )
     except Exception:
         logger.warning("Model bundle not found, alerts will not be generated until a model is trained.")
         
-    alerts = scored.filter(col("if_score") >= lit(threshold))
+    alerts = (
+        scored.filter(col("if_score") >= lit(threshold))
+        .withColumn("detected_at", current_timestamp())
+        .withColumn("decision_threshold", lit(threshold))
+        .withColumn("model_version", lit(model_version))
+        .withColumn("is_fraud_label", col("isFraud") == lit(1))
+    )
     
     cass_query = (
         _write_cassandra(alerts, cfg.cassandra)
@@ -159,9 +173,6 @@ def main() -> None:
         
     spark.streams.awaitAnyTermination()
 
-if __name__ == "__main__":
-    main()
-
 def _parse_messages(raw_df: "DataFrame", cfg: AppConfig) -> tuple["DataFrame", "DataFrame"]:
     """Parse JSON and route malformed records to DLQ.
     
@@ -173,9 +184,11 @@ def _parse_messages(raw_df: "DataFrame", cfg: AppConfig) -> tuple["DataFrame", "
     base_epoch = 1767225600  # 2026-01-01 00:00:00 UTC
     
     parsed_all = (
-        raw_df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
+        raw_df.selectExpr(
+            "CAST(key AS STRING)", "CAST(value AS STRING)", "partition", "offset"
+        )
         .withColumn("data", from_json(col("value"), _paysim_schema()))
-        .select("key", "value", "data.*")
+        .select("key", "value", "partition", "offset", "data.*")
     )
     
     # Event time: base_epoch + step * 3600
@@ -248,6 +261,8 @@ def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "Dat
             from cassandra.cluster import Cluster
             from cassandra.auth import PlainTextAuthProvider
             from cassandra.query import BatchStatement
+            from decimal import Decimal
+            from uuid import NAMESPACE_URL, uuid5
         except ImportError:
             logger.warning("Cassandra driver not available, skipping write.")
             return
@@ -259,66 +274,63 @@ def _write_cassandra(alert_df: "DataFrame", cfg_cass: "CassandraConfig") -> "Dat
         cluster = Cluster(
             contact_points=cfg_cass.contact_points,
             port=cfg_cass.port,
-            auth_provider=auth_provider
+            auth_provider=auth_provider,
         )
-        session = cluster.connect(cfg_cass.keyspace)
-        
-        insert_stmt = session.prepare(
-            f"INSERT INTO {cfg_cass.keyspace}.fraud_alerts "
-            "(bucket, event_time, name_orig, name_dest, amount, if_score, tx_type) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        
-        # Convert DataFrame to a list of dicts
-        import time
-        start_time = time.time()
-        
-        rows = [row.asDict() for row in df.collect()]
-        
         try:
+            session = cluster.connect(cfg_cass.keyspace)
+            insert_stmt = session.prepare(
+                f"INSERT INTO {cfg_cass.keyspace}.fraud_alerts "
+                "(alert_bucket, detected_at, alert_id, name_orig, name_dest, step, "
+                "tx_type, amount, old_balance_orig, new_balance_orig, "
+                "old_balance_dest, new_balance_dest, anomaly_score, "
+                "decision_threshold, model_version, is_fraud_label) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+            rows = [row.asDict() for row in df.collect()]
             ALERTS_GENERATED.inc(len(rows))
             for row in rows:
                 ALERT_AMOUNT.observe(float(row.get("amount", 0.0)))
-        except NameError:
-            pass  # Prometheus not available
-            
-        from common.schema import alert_bucket
-        from datetime import datetime, timezone
-        
-        # Write in batches
-        for i in range(0, len(rows), cfg_cass.write_batch_size):
-            batch = rows[i:i + cfg_cass.write_batch_size]
-            batch_stmt = BatchStatement()
-            
-            for row in batch:
-                # Reconstruct event time and format bucket
-                event_time_dt = row.get("event_time")
-                if not event_time_dt:
-                    event_time_dt = datetime.now(timezone.utc)
-                    
-                bucket = alert_bucket(event_time_dt)
-                
-                batch_stmt.add(insert_stmt, (
-                    bucket,
-                    event_time_dt,
-                    row.get("nameOrig", ""),
-                    row.get("nameDest", ""),
-                    float(row.get("amount", 0.0)),
-                    float(row.get("if_score", 0.0)),
-                    row.get("type", "")
-                ))
-            
-            # Simple retry loop
-            for attempt in range(cfg_cass.max_write_retries):
-                try:
-                    session.execute(batch_stmt, timeout=cfg_cass.request_timeout_seconds)
-                    break
-                except Exception as e:
-                    if attempt == cfg_cass.max_write_retries - 1:
-                        logger.error(f"Failed to write batch to Cassandra: {e}")
-                        raise
-        
-        cluster.shutdown()
+
+            from common.schema import alert_bucket
+            from datetime import datetime, timezone
+
+            for start in range(0, len(rows), cfg_cass.write_batch_size):
+                batch_stmt = BatchStatement()
+                for row in rows[start : start + cfg_cass.write_batch_size]:
+                    detected_at = row.get("detected_at") or datetime.now(timezone.utc)
+                    if detected_at.tzinfo is None:
+                        detected_at = detected_at.replace(tzinfo=timezone.utc)
+                    alert_id = uuid5(
+                        NAMESPACE_URL,
+                        f"transactions:{row['partition']}:{row['offset']}",
+                    )
+                    batch_stmt.add(insert_stmt, (
+                        alert_bucket(detected_at), detected_at, alert_id,
+                        row.get("nameOrig", ""), row.get("nameDest", ""),
+                        int(row.get("step", 0)), row.get("type", ""),
+                        Decimal(str(row.get("amount", 0.0))),
+                        Decimal(str(row.get("oldbalanceOrg", 0.0))),
+                        Decimal(str(row.get("newbalanceOrig", 0.0))),
+                        Decimal(str(row.get("oldbalanceDest", 0.0))),
+                        Decimal(str(row.get("newbalanceDest", 0.0))),
+                        float(row.get("if_score", 0.0)),
+                        float(row.get("decision_threshold", 0.0)),
+                        row.get("model_version", "unknown"),
+                        bool(row.get("is_fraud_label", False)),
+                    ))
+                for attempt in range(cfg_cass.max_write_retries):
+                    try:
+                        session.execute(
+                            batch_stmt,
+                            timeout=cfg_cass.request_timeout_seconds,
+                        )
+                        break
+                    except Exception:
+                        if attempt == cfg_cass.max_write_retries - 1:
+                            logger.exception("Failed to write alert batch to Cassandra")
+                            raise
+        finally:
+            cluster.shutdown()
 
     # Returns the DataStreamWriter
     return alert_df.writeStream.foreachBatch(process_batch)
@@ -372,3 +384,7 @@ def expose_metrics(port: int) -> None:
         logger.info(f"Prometheus metrics server started on port {port}")
     except Exception as e:
         logger.error(f"Failed to start metrics server: {e}")
+
+
+if __name__ == "__main__":
+    main()

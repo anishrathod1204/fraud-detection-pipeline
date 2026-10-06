@@ -410,10 +410,28 @@ class TestPublish:
         assert len(fake.sent[0][2]) == expected
 
     def test_serializes_key_via_client_serializer(
-        self, sample_record: dict[str, Any], kafka_module: Any
+        self, sample_record: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Against the real stub client (which applies the key serializer the
         # publisher passes) the key on the wire is UTF-8 bytes, not a str.
+        class SerializerRecordingProducer:
+            def __init__(self, **kwargs: Any) -> None:
+                self.key_serializer = kwargs["key_serializer"]
+                self.sent: list[tuple[str, bytes | None, bytes]] = []
+
+            def send(self, topic: str, *, key: str, value: bytes) -> _FakeFuture:
+                self.sent.append((topic, self.key_serializer(key), value))
+                return _FakeFuture()
+
+            def flush(self, timeout: float | None = None) -> None:
+                return None
+
+            def close(self, timeout: float | None = None) -> None:
+                return None
+
+        monkeypatch.setattr(
+            publisher_module, "KafkaProducer", SerializerRecordingProducer
+        )
         publisher = TransactionPublisher(
             make_config(), flush_every_records=500, flush_interval_seconds=3600.0
         )
