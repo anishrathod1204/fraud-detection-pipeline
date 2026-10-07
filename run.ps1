@@ -147,3 +147,18 @@ function Cmd-Health {
     if ($fail -eq 0) { Write-Host "`nAll checks passed." -ForegroundColor Green } else { Write-Host "`n$fail check(s) failed. See: .\run.ps1 logs <service>" -ForegroundColor Red }
 }
 
+switch ($Command.ToLower()) {
+    "all"    { Cmd-Up; Cmd-Data; Cmd-Train; Cmd-Start }
+    "up"     { Cmd-Up }
+    "data"   { Cmd-Data }
+    "train"  { Cmd-Train }
+    "start"  { Cmd-Start }
+    "health" { Cmd-Health }
+    "urls"   { Cmd-Urls }
+    "test"   { Assert-Docker; Ensure-Env; docker compose run --rm tests }
+    "logs"   { Assert-Docker; if ($Service) { docker compose --profile app logs --tail 100 $Service } else { docker compose --profile app logs --tail 40 } }
+    "stop"   { Assert-Docker; docker compose --profile app stop scorer producer dashboard }
+    "down"   { Assert-Docker; docker compose --profile app down --remove-orphans }
+    "clean"  { Assert-Docker; docker compose --profile app down -v --remove-orphans; Remove-Stale }
+    default  { Get-Help $PSCommandPath | Out-Host }
+}
