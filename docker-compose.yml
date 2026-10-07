@@ -148,6 +148,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  dashboard:
+    <<: *app
+    container_name: fraud-dashboard
+    command: ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+    profiles: ["app"]
+    ports:
+      - "8501:8501"
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   fraud-net:
     name: fraud-net
