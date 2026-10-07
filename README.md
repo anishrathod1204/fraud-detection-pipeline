@@ -9,3 +9,7 @@ CSV ─► producer ─► Kafka ─► scorer (features + Isolation Forest) ─
 ```
 More detail in [docs/architecture.md](docs/architecture.md).
 
+## Requirements
+- Docker Desktop (running), ~6 GB free RAM, ~5 GB disk
+- Windows: PowerShell. macOS/Linux: `make`
+
