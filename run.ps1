@@ -111,3 +111,16 @@ function Cmd-Up {
     Fail "Timed out waiting for services. Try: .\run.ps1 logs cassandra"
 }
 
+function Cmd-Data  { Assert-Docker; Ensure-Env; Info "Generating data..."; docker compose run --rm datagen; if ($LASTEXITCODE -ne 0) { Fail "data step failed" } }
+function Cmd-Train { Assert-Docker; Ensure-Env; Info "Training model..."; docker compose run --rm trainer; if ($LASTEXITCODE -ne 0) { Fail "training failed" } }
+
+function Cmd-Start {
+    Assert-Docker; Ensure-Env
+    if (-not (Test-Path "models\isolation_forest.joblib")) { Fail "No model yet. Run: .\run.ps1 data ; .\run.ps1 train" }
+    Info "Starting producer, scorer, dashboard..."
+    docker compose --profile app up -d --build scorer producer dashboard
+    if ($LASTEXITCODE -ne 0) { Fail "could not start app services" }
+    Ok "App started. Give it ~30s to connect to Cassandra and Kafka, then run: .\run.ps1 health"
+    Cmd-Urls
+}
+
