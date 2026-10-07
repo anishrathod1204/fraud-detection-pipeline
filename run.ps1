@@ -124,3 +124,26 @@ function Cmd-Start {
     Cmd-Urls
 }
 
+function Cmd-Health {
+    Assert-Docker
+    $fail = 0
+    foreach ($n in @("fraud-kafka", "fraud-cassandra", "fraud-prometheus", "fraud-grafana")) {
+        $h = Get-Health $n
+        if ($h -eq "healthy") { Ok "$n" } else { Bad "$n ($h)"; $fail++ }
+    }
+    foreach ($n in @("fraud-scorer", "fraud-producer", "fraud-dashboard")) {
+        $h = Get-Health $n
+        if ($h -eq "running") { Ok "$n" } else { Bad "$n ($h)"; $fail++ }
+    }
+    if (Test-Http "http://localhost:3000/api/health") { Ok "Grafana API" } else { Bad "Grafana API"; $fail++ }
+    if (Test-Http "http://localhost:9090/-/healthy")  { Ok "Prometheus API" } else { Bad "Prometheus API"; $fail++ }
+    if (Test-Http "http://localhost:8080")            { Ok "Kafka UI" } else { Bad "Kafka UI"; $fail++ }
+    if (Test-Http "http://localhost:8501")            { Ok "Dashboard" } else { Bad "Dashboard"; $fail++ }
+    try {
+        $m = (Invoke-WebRequest -Uri "http://localhost:8000/metrics" -UseBasicParsing -TimeoutSec 5).Content
+        $line = ($m -split "`n" | Where-Object { $_ -match "^fraud_transactions_processed_total " }) | Select-Object -First 1
+        Ok "Scorer metrics: $line"
+    } catch { Bad "Scorer metrics (is the scorer running?)"; $fail++ }
+    if ($fail -eq 0) { Write-Host "`nAll checks passed." -ForegroundColor Green } else { Write-Host "`n$fail check(s) failed. See: .\run.ps1 logs <service>" -ForegroundColor Red }
+}
+
