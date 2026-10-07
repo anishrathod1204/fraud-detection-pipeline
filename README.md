@@ -62,3 +62,15 @@ alerts to be much rarer and the precision lower than on the generated data.
 Edit `.env`: `PRODUCER_RATE` (tx/s). After changing it: `docker compose --profile app up -d producer`.
 Code is bind-mounted into the containers: edit, then `docker compose --profile app restart scorer`.
 
+## Project layout
+```
+common/      config, feature engineering (shared by training + serving), Cassandra + Kafka helpers
+scripts/     synthetic data generator
+training/    Isolation Forest training + evaluation report
+producer/    CSV → Kafka replayer
+streaming/   Kafka → score → Cassandra, Prometheus metrics
+dashboard/   Streamlit alert feed
+infra/       Prometheus + Grafana provisioning and dashboard
+tests/       unit tests (data, features, training, scoring)
+```
+
