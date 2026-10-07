@@ -83,3 +83,7 @@ tests/       unit tests (data, features, training, scoring)
 - **Dashboard says "No alerts yet":** wait ~1 min; check `.\run.ps1 logs scorer` and `.\run.ps1 logs producer`.
 - **`make` errors on Windows PowerShell:** use `.\run.ps1` instead.
 
+## Honest notes
+- The synthetic data is generated so fraud has the same *shape* as PaySim fraud (account drained via TRANSFER/CASH_OUT,
+  balances not reconciling). Metrics on it are optimistic; treat them as a smoke test, not a benchmark.
+- The streaming layer is a Python consumer, not Spark (rationale in docs/architecture.md).
