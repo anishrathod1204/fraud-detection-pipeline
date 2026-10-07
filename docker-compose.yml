@@ -138,6 +138,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  producer:
+    <<: *app
+    container_name: fraud-producer
+    command: ["python", "producer/producer.py"]
+    profiles: ["app"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   fraud-net:
     name: fraud-net
