@@ -58,3 +58,7 @@ Download `PS_20174392719_1491204439457_log.csv` from Kaggle ("PaySim synthetic f
 save it as `data/paysim.csv`, then `.\run.ps1 train`. Real fraud is only ~0.13% of rows, so expect
 alerts to be much rarer and the precision lower than on the generated data.
 
+## Tuning
+Edit `.env`: `PRODUCER_RATE` (tx/s). After changing it: `docker compose --profile app up -d producer`.
+Code is bind-mounted into the containers: edit, then `docker compose --profile app restart scorer`.
+
