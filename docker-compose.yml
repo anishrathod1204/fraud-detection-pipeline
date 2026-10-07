@@ -169,6 +169,12 @@ services:
     command: ["python", "scripts/generate_data.py", "--rows", "200000", "--fraud-rate", "0.01"]
     profiles: ["jobs"]
 
+  trainer:
+    <<: *app
+    container_name: fraud-trainer
+    command: ["python", "training/train.py"]
+    profiles: ["jobs"]
+
 networks:
   fraud-net:
     name: fraud-net
