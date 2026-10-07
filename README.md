@@ -74,3 +74,12 @@ infra/       Prometheus + Grafana provisioning and dashboard
 tests/       unit tests (data, features, training, scoring)
 ```
 
+## Troubleshooting
+- **Name conflict / port already in use** (`fraud-kafka` exists): leftovers from an older copy of this project.
+  `run.ps1 up` / `make up` now remove them automatically. Manual fix (PowerShell):
+  `docker ps -aq --filter "name=fraud-" | ForEach-Object { docker rm -f $_ }` then `docker network rm fraud-net`.
+- **Cassandra unhealthy / restarting:** usually low memory. Docker Desktop → Settings → Resources → Memory ≥ 6 GB.
+- **Scorer exits "Model not found":** run `data` then `train` before `start`.
+- **Dashboard says "No alerts yet":** wait ~1 min; check `.\run.ps1 logs scorer` and `.\run.ps1 logs producer`.
+- **`make` errors on Windows PowerShell:** use `.\run.ps1` instead.
+
