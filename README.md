@@ -39,3 +39,17 @@ Then open:
 Check everything: `.\run.ps1 health` (or `make health`). Within ~1 minute the dashboard shows alerts and
 Grafana shows throughput of about 40 tx/s.
 
+## Commands
+
+| Windows | Linux/macOS | Does |
+|---|---|---|
+| `.\run.ps1 up` | `make up` | Kafka, Cassandra, Prometheus, Grafana, Kafka UI |
+| `.\run.ps1 data` | `make data` | Generate PaySim-style data (skipped if `data/paysim.csv` exists) |
+| `.\run.ps1 train` | `make train` | Train model, write `docs/model_evaluation.md` |
+| `.\run.ps1 start` | `make start` | Producer + scorer + dashboard |
+| `.\run.ps1 logs scorer` | `make logs S=scorer` | Tail logs |
+| `.\run.ps1 test` | `make test` | Unit tests |
+| `.\run.ps1 stop` | `make stop` | Stop app only |
+| `.\run.ps1 down` | `make down` | Stop all, keep data |
+| `.\run.ps1 clean` | `make clean` | Stop all, delete data |
+
