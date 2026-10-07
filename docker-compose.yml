@@ -175,6 +175,12 @@ services:
     command: ["python", "training/train.py"]
     profiles: ["jobs"]
 
+  tests:
+    <<: *app
+    container_name: fraud-tests
+    command: ["python", "-m", "pytest", "-q", "tests"]
+    profiles: ["jobs"]
+
 networks:
   fraud-net:
     name: fraud-net
