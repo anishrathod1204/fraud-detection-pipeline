@@ -123,6 +123,21 @@ services:
     restart: unless-stopped
     networks: [fraud-net]
 
+  # ------------------------------------------------------------------ application (profile: app)
+  scorer:
+    <<: *app
+    container_name: fraud-scorer
+    command: ["python", "streaming/scorer.py"]
+    profiles: ["app"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   fraud-net:
     name: fraud-net
