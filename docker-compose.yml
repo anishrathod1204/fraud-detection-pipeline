@@ -111,6 +111,18 @@ services:
         condition: service_healthy
     networks: [fraud-net]
 
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: fraud-kafka-exporter
+    command: ["--kafka.server=kafka:29092"]
+    ports:
+      - "9308:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [fraud-net]
+
 networks:
   fraud-net:
     name: fraud-net
