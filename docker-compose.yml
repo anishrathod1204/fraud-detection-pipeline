@@ -98,6 +98,19 @@ services:
         condition: service_healthy
     networks: [fraud-net]
 
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: fraud-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [fraud-net]
+
 networks:
   fraud-net:
     name: fraud-net
