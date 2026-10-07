@@ -73,3 +73,41 @@ function Remove-Stale {
     }
 }
 
+function Cmd-Urls {
+    Write-Host @"
+
+Dashboard (alerts)  http://localhost:8501
+Grafana (metrics)   http://localhost:3000   (admin / admin)
+Kafka UI            http://localhost:8080
+Prometheus          http://localhost:9090
+Scorer metrics      http://localhost:8000/metrics
+"@
+}
+
+function Cmd-Up {
+    Assert-Docker; Ensure-Env
+    Remove-Stale
+    docker compose config -q
+    if ($LASTEXITCODE -ne 0) { Fail "docker-compose.yml is invalid." }
+    Info "Starting infrastructure (first run downloads images - be patient)..."
+    docker compose up -d --remove-orphans kafka cassandra prometheus grafana kafka-ui kafka-exporter
+    if ($LASTEXITCODE -ne 0) {
+        Info "Start failed; retrying once from a clean state..."
+        docker compose down --remove-orphans *> $null
+        docker compose up -d --remove-orphans kafka cassandra prometheus grafana kafka-ui kafka-exporter
+        if ($LASTEXITCODE -ne 0) { Fail "Still failing. Run: docker compose logs --tail 80" }
+    }
+    $deadline = (Get-Date).AddMinutes(6)
+    while ((Get-Date) -lt $deadline) {
+        $pending = @()
+        foreach ($n in @("fraud-kafka", "fraud-cassandra", "fraud-prometheus", "fraud-grafana")) {
+            $h = Get-Health $n
+            if ($h -ne "healthy") { $pending += "$n=$h" }
+        }
+        if ($pending.Count -eq 0) { Ok "Infrastructure is healthy."; return }
+        Write-Host ("  waiting: " + ($pending -join ", "))
+        Start-Sleep -Seconds 8
+    }
+    Fail "Timed out waiting for services. Try: .\run.ps1 logs cassandra"
+}
+
