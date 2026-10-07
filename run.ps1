@@ -48,3 +48,28 @@ function Test-Http($url) {
 
 
 # Remove leftovers from an older/other copy of this project (same fixed names, different compose project).
+function Remove-Stale {
+    $project = "fraud-pipeline"
+    $rows = docker ps -a --filter "name=fraud-" --format '{{.Names}}|{{.Labels}}' 2>$null
+    foreach ($r in $rows) {
+        if (-not $r) { continue }
+        if ($r -notmatch "com\.docker\.compose\.project=$project(,|$)") {
+            $name = $r.Split('|')[0]
+            Info "Removing leftover container from another project: $name"
+            docker rm -f $name *> $null
+        }
+    }
+    $net = docker network inspect fraud-net --format '{{.Labels}}' 2>$null
+    if ($LASTEXITCODE -eq 0 -and ($net | Out-String) -notmatch "com\.docker\.compose\.project:$project") {
+        Info "Removing leftover network fraud-net"
+        docker network rm fraud-net *> $null
+    }
+    foreach ($v in @("fraud-cassandra-data", "fraud-grafana-data", "fraud-prometheus-data", "fraud-kafka-data")) {
+        $lab = docker volume inspect $v --format '{{.Labels}}' 2>$null
+        if ($LASTEXITCODE -eq 0 -and ($lab | Out-String) -notmatch "com\.docker\.compose\.project:$project") {
+            Info "Removing leftover volume $v (old demo data)"
+            docker volume rm $v *> $null
+        }
+    }
+}
+
