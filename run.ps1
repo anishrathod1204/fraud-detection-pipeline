@@ -27,3 +27,24 @@ function Ok($m)   { Write-Host "[ OK ] $m" -ForegroundColor Green }
 function Bad($m)  { Write-Host "[FAIL] $m" -ForegroundColor Red }
 function Info($m) { Write-Host ">> $m" -ForegroundColor Cyan }
 
+function Assert-Docker {
+    docker info *> $null
+    if ($LASTEXITCODE -ne 0) { Fail "Docker is not running. Start Docker Desktop, wait for 'running', then retry." }
+}
+
+function Ensure-Env {
+    if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Ok ".env created" }
+}
+
+function Get-Health($name) {
+    $r = docker inspect -f "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $name 2>$null
+    if ($LASTEXITCODE -ne 0) { return "missing" }
+    return ($r | Out-String).Trim()
+}
+
+function Test-Http($url) {
+    try { $null = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5; return $true } catch { return $false }
+}
+
+
+# Remove leftovers from an older/other copy of this project (same fixed names, different compose project).
