@@ -57,6 +57,21 @@ services:
       start_period: 60s
     networks: [fraud-net]
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: fraud-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [fraud-net]
+
 networks:
   fraud-net:
     name: fraud-net
