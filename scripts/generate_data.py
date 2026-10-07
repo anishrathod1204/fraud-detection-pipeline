@@ -70,9 +70,11 @@ def generate(rows: int, fraud_rate: float, seed: int = 42) -> pd.DataFrame:
     df = pd.concat([legit, fraud], ignore_index=True).sample(frac=1.0, random_state=seed).reset_index(drop=True)
     df["step"] = rng.integers(1, 744, size=len(df))
     df = df.sort_values("step", kind="stable").reset_index(drop=True)
-    df["nameOrig"] = "C" + rng.integers(10**8, 10**9, size=len(df)).astype(str)
-    is_merchant = df["type"].isin(["PAYMENT", "DEBIT", "CASH_IN"])
-    df["nameDest"] = np.where(is_merchant, "M", "C") + rng.integers(10**8, 10**9, size=len(df)).astype(str)
+    # np.char.add works on every numpy version ("C" + str_array fails on numpy 1.x)
+    df["nameOrig"] = np.char.add("C", rng.integers(10**8, 10**9, size=len(df)).astype(str))
+    is_merchant = df["type"].isin(["PAYMENT", "DEBIT", "CASH_IN"]).to_numpy()
+    df["nameDest"] = np.char.add(np.where(is_merchant, "M", "C"),
+                                 rng.integers(10**8, 10**9, size=len(df)).astype(str))
     df["isFlaggedFraud"] = 0
     return df[RAW_COLUMNS]
 
