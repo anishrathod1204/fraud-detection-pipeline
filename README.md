@@ -53,3 +53,8 @@ Grafana shows throughput of about 40 tx/s.
 | `.\run.ps1 down` | `make down` | Stop all, keep data |
 | `.\run.ps1 clean` | `make clean` | Stop all, delete data |
 
+## Using the real PaySim dataset
+Download `PS_20174392719_1491204439457_log.csv` from Kaggle ("PaySim synthetic financial datasets"),
+save it as `data/paysim.csv`, then `.\run.ps1 train`. Real fraud is only ~0.13% of rows, so expect
+alerts to be much rarer and the precision lower than on the generated data.
+
